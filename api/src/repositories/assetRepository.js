@@ -11,8 +11,21 @@ class AssetRepository extends BaseRepository {
       `SELECT a.*, c.name as company_name 
        FROM assets a 
        JOIN companies c ON a.company_id = c.id 
-       WHERE c.user_id = ?`,
+       WHERE c.user_id = ?
+       ORDER BY a.id ASC`,
       [userId],
+    );
+    return rows;
+  }
+
+  async findAllByCompanyId(companyId, userId) {
+    const [rows] = await db.query(
+      `SELECT a.*, c.name as company_name
+       FROM assets a
+       JOIN companies c ON a.company_id = c.id
+       WHERE a.company_id = ? AND c.user_id = ?
+       ORDER BY a.id ASC`,
+      [companyId, userId],
     );
     return rows;
   }

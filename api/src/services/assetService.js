@@ -1,7 +1,10 @@
 const AssetRepository = require("../repositories/assetRepository");
 
 class AssetService {
-  async getAssetsByUser(userId) {
+  async getAssetsByUser(userId, companyId = null) {
+    if (companyId) {
+      return await AssetRepository.findAllByCompanyId(companyId, userId);
+    }
     return await AssetRepository.findAllByUserId(userId);
   }
 

@@ -3,7 +3,11 @@ const AssetService = require("../services/assetService");
 class AssetController {
   async getAll(req, res, next) {
     try {
-      const assets = await AssetService.getAssetsByUser(req.user.id);
+      const companyId = req.query.companyId || null;
+      const assets = await AssetService.getAssetsByUser(
+        req.user.id,
+        companyId,
+      );
       res.status(200).json(assets);
     } catch (error) {
       next(error);

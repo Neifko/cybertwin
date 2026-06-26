@@ -1,42 +1,91 @@
 import { defineStore } from "pinia";
 
+const API_URL = "http://localhost:3000/api/company";
+
+function mapCompany(rawData) {
+  let servicesArray = [];
+  if (rawData.exposed_services) {
+    try {
+      servicesArray = JSON.parse(rawData.exposed_services);
+    } catch {
+      servicesArray = [rawData.exposed_services];
+    }
+  }
+
+  return {
+    id: rawData.id,
+    name: rawData.name,
+    sector: rawData.sector,
+    employeesCount: rawData.employees_count || 0,
+    serversCount: rawData.servers_count || 0,
+    clientWorkstationsCount: rawData.workstations_count || 0,
+    exposedServices: servicesArray,
+  };
+}
+
+function buildPayload(companyData) {
+  return {
+    name: companyData.name,
+    sector: companyData.sector,
+    employees_count: companyData.employeesCount,
+    servers_count: companyData.serversCount,
+    workstations_count: companyData.clientWorkstationsCount,
+    exposed_services: JSON.stringify(companyData.exposedServices || []),
+  };
+}
+
 export const useCompanyStore = defineStore("company", {
   state: () => ({
-    company: null,
+    companies: [],
+    selectedCompanyId: null,
     loading: false,
     error: null,
   }),
+
+  getters: {
+    selectedCompany(state) {
+      return (
+        state.companies.find((c) => c.id === state.selectedCompanyId) ||
+        state.companies[0] ||
+        null
+      );
+    },
+    company(state) {
+      return (
+        state.companies.find((c) => c.id === state.selectedCompanyId) ||
+        state.companies[0] ||
+        null
+      );
+    },
+  },
+
   actions: {
-    async fetchCompany(token) {
+    selectCompany(id) {
+      this.selectedCompanyId = id;
+    },
+
+    async fetchCompanies(token) {
       this.loading = true;
+      this.error = null;
+
       try {
-        const response = await fetch("http://localhost:3000/api/company", {
+        const response = await fetch(API_URL, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (response.ok) {
           const rawData = await response.json();
+          this.companies = rawData.map(mapCompany);
 
-          let servicesArray = [];
-          if (rawData.exposed_services) {
-            try {
-              servicesArray = JSON.parse(rawData.exposed_services);
-            } catch (e) {
-              servicesArray = [rawData.exposed_services];
-            }
+          if (
+            !this.selectedCompanyId ||
+            !this.companies.some((c) => c.id === this.selectedCompanyId)
+          ) {
+            this.selectedCompanyId = this.companies[0]?.id || null;
           }
-
-          this.company = {
-            id: rawData.id,
-            name: rawData.name,
-            sector: rawData.sector,
-            employeesCount: rawData.employees_count || 0,
-            serversCount: rawData.servers_count || 0,
-            clientWorkstationsCount: rawData.workstations_count || 0,
-            exposedServices: servicesArray,
-          };
-        } else if (response.status === 404) {
-          this.company = null;
+        } else {
+          this.companies = [];
+          this.selectedCompanyId = null;
         }
       } catch (error) {
         console.error("Erreur de récupération:", error);
@@ -46,34 +95,69 @@ export const useCompanyStore = defineStore("company", {
       }
     },
 
-    async updateCompany(companyData, token) {
-      try {
-        const payload = {
-          name: companyData.name,
-          sector: companyData.sector,
-          employees_count: companyData.employeesCount,
-          servers_count: companyData.serversCount,
-          workstations_count: companyData.clientWorkstationsCount,
-          exposed_services: JSON.stringify(companyData.exposedServices),
-        };
+    async fetchCompany(token) {
+      await this.fetchCompanies(token);
+    },
 
-        const response = await fetch("http://localhost:3000/api/company", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        });
+    async createCompany(companyData, token) {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(buildPayload(companyData)),
+      });
 
-        if (response.ok) {
-          await this.fetchCompany(token);
-        } else {
-          console.error("Erreur renvoyée par l'API :", await response.text());
-        }
-      } catch (error) {
-        console.error("Erreur de mise à jour:", error);
+      if (response.ok) {
+        const result = await response.json();
+        await this.fetchCompanies(token);
+        this.selectCompany(result.id);
+        return result.id;
       }
+
+      const errorMsg = await response.json().catch(() => ({}));
+      throw new Error(errorMsg.message || "Erreur lors de la création.");
+    },
+
+    async updateCompany(companyData, token) {
+      if (!companyData.id) {
+        throw new Error("Identifiant d'entreprise manquant.");
+      }
+
+      const response = await fetch(`${API_URL}/${companyData.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(buildPayload(companyData)),
+      });
+
+      if (response.ok) {
+        await this.fetchCompanies(token);
+        this.selectCompany(companyData.id);
+      } else {
+        const errorMsg = await response.text();
+        console.error("Erreur renvoyée par l'API :", errorMsg);
+        throw new Error("Erreur lors de la mise à jour.");
+      }
+    },
+
+    async deleteCompany(id, token) {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        await this.fetchCompanies(token);
+        return true;
+      }
+
+      const errorMsg = await response.json().catch(() => ({}));
+      alert(errorMsg.message || "Erreur lors de la suppression.");
+      return false;
     },
   },
 });

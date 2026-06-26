@@ -2,19 +2,32 @@
 import { onMounted, computed } from 'vue'
 import { useVulnerabilitiesStore } from '../stores/vulnerabilities'
 import { useAssetsStore } from '../stores/assets'
+import { useCompanyStore } from '../stores/company'
 import { useAuth0 } from '@auth0/auth0-vue'
 
 const vulnStore = useVulnerabilitiesStore()
 const assetsStore = useAssetsStore()
+const companyStore = useCompanyStore()
 const { getAccessTokenSilently } = useAuth0()
 
 onMounted(async () => {
   const token = await getAccessTokenSilently()
+  await companyStore.fetchCompanies(token)
   await Promise.all([
-    vulnStore.fetchVulnerabilities(token),
-    assetsStore.fetchAssets(token)
+    vulnStore.fetchVulnerabilities(token, companyStore.selectedCompanyId),
+    assetsStore.fetchAssets(token, companyStore.selectedCompanyId),
   ])
 })
+
+async function onCompanyChange(event) {
+  const companyId = Number(event.target.value)
+  companyStore.selectCompany(companyId)
+  const token = await getAccessTokenSilently()
+  await Promise.all([
+    vulnStore.fetchVulnerabilities(token, companyId),
+    assetsStore.fetchAssets(token, companyId),
+  ])
+}
 
 function assetName(assetId) {
   const asset = assetsStore.assets.find((a) => a.id === assetId)
@@ -53,21 +66,33 @@ async function clearAudit() {
           <i class="ti ti-radar text-blue-600 mr-2"></i>Scanner de Vulnérabilités
         </h1>
         <p class="text-sm text-slate-500">
-          Analysez vos actifs ({{ assetsStore.totalAssets }}) pour détecter automatiquement les failles de sécurité.
+          Analysez les actifs de
+          <span class="font-medium text-slate-700">{{ companyStore.selectedCompany?.name || '—' }}</span>
+          ({{ assetsStore.totalAssets }}) pour détecter automatiquement les failles de sécurité.
         </p>
       </div>
-      
-      <div class="flex gap-2">
+
+      <div class="flex gap-2 flex-wrap items-center">
+        <select
+          v-if="companyStore.companies.length > 0"
+          :value="companyStore.selectedCompanyId"
+          @change="onCompanyChange"
+          class="input-cyber min-w-[220px]"
+        >
+          <option v-for="company in companyStore.companies" :key="company.id" :value="company.id">
+            {{ company.name }}
+          </option>
+        </select>
         <button 
           @click="clearAudit" 
-          v-if="vulnStore.vulnerabilities.length > 0"
+          v-if="vulnStore.vulnerabilitiesForSelectedCompany.length > 0"
           class="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 font-medium transition flex items-center gap-2"
         >
           <i class="ti ti-trash"></i> Vider
         </button>
         <button 
           @click="triggerAudit" 
-          :disabled="assetsStore.assets.length === 0 || vulnStore.loading"
+          :disabled="assetsStore.totalAssets === 0 || vulnStore.loading || !companyStore.selectedCompanyId"
           class="btn-cyber"
         >
           <i :class="vulnStore.loading ? 'ti ti-loader animate-spin' : 'ti ti-scan'"></i>
@@ -100,7 +125,7 @@ async function clearAudit() {
         </thead>
         <tbody>
           <tr
-            v-for="vuln in vulnStore.vulnerabilities"
+            v-for="vuln in vulnStore.vulnerabilitiesForSelectedCompany"
             :key="vuln.id"
             class="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition"
           >
@@ -122,7 +147,7 @@ async function clearAudit() {
         </tbody>
       </table>
 
-      <div v-if="vulnStore.vulnerabilities.length === 0" class="text-center text-slate-500 py-12">
+      <div v-if="vulnStore.vulnerabilitiesForSelectedCompany.length === 0" class="text-center text-slate-500 py-12">
         <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
           <i class="ti ti-shield-check text-3xl text-green-500"></i>
         </div>

@@ -3,15 +3,7 @@ const AssetRepository = require("../repositories/assetRepository");
 const VulnerabilityRepository = require("../repositories/vulnerabilityRepository");
 
 class RiskService {
-  async calculateRisk(userId) {
-    const company = await CompanyRepository.findByUserId(userId);
-    if (!company)
-      throw new Error("Veuillez d'abord configurer votre entreprise.");
-
-    const assets = await AssetRepository.findAllByUserId(userId);
-    const vulnerabilities =
-      await VulnerabilityRepository.findAllByUserId(userId);
-
+  buildReport(company, assets, vulnerabilities) {
     let totalScore = 0;
     const recommendations = [];
 
@@ -70,16 +62,60 @@ class RiskService {
     }
 
     return {
+      companyId: company.id,
       companyName: company.name,
       metrics: {
         totalAssets: assets.length,
         totalVulnerabilities: vulnerabilities.length,
-        internetExposure: internetExposure,
+        exposedAssets: assets.filter((a) => a.is_exposed).length,
+        internetExposure,
       },
       score: totalScore,
       level: riskLevel,
-      recommendations: recommendations,
+      recommendations,
     };
+  }
+
+  async calculateRisk(userId, companyId) {
+    const company = await CompanyRepository.findByIdAndUserId(
+      companyId,
+      userId,
+    );
+    if (!company) {
+      throw new Error("Entreprise introuvable.");
+    }
+
+    const assets = await AssetRepository.findAllByCompanyId(companyId, userId);
+    const vulnerabilities = await VulnerabilityRepository.findAllByCompanyId(
+      companyId,
+      userId,
+    );
+
+    return this.buildReport(company, assets, vulnerabilities);
+  }
+
+  async calculateAllRisks(userId) {
+    const companies = await CompanyRepository.findAllByUserId(userId);
+
+    if (companies.length === 0) {
+      throw new Error("Veuillez d'abord configurer au moins une entreprise.");
+    }
+
+    const reports = await Promise.all(
+      companies.map(async (company) => {
+        const assets = await AssetRepository.findAllByCompanyId(
+          company.id,
+          userId,
+        );
+        const vulnerabilities = await VulnerabilityRepository.findAllByCompanyId(
+          company.id,
+          userId,
+        );
+        return this.buildReport(company, assets, vulnerabilities);
+      }),
+    );
+
+    return reports;
   }
 }
 

@@ -4,6 +4,21 @@ import { useRiskStore } from "./risk";
 
 const API_URL = "http://localhost:3000/api/assets";
 
+function mapAsset(raw) {
+  return {
+    id: raw.id,
+    companyId: raw.company_id,
+    companyName: raw.company_name,
+    name: raw.name,
+    type: raw.type,
+    description: raw.description,
+    internetExposed:
+      raw.is_exposed === 1 ||
+      raw.is_exposed === true ||
+      raw.internetExposed === true,
+  };
+}
+
 export const useAssetsStore = defineStore("assets", {
   state: () => ({
     assets: [],
@@ -12,37 +27,46 @@ export const useAssetsStore = defineStore("assets", {
   }),
 
   getters: {
-    assetsByType: (state) => {
-      return state.assets.reduce((acc, asset) => {
+    assetsForSelectedCompany(state) {
+      const companyStore = useCompanyStore();
+      const companyId = companyStore.selectedCompanyId;
+      if (!companyId) return state.assets;
+      return state.assets.filter(
+        (asset) => String(asset.companyId) === String(companyId),
+      );
+    },
+
+    assetsByType() {
+      return this.assetsForSelectedCompany.reduce((acc, asset) => {
         acc[asset.type] = (acc[asset.type] || 0) + 1;
         return acc;
       }, {});
     },
-    totalAssets: (state) => state.assets.length,
+
+    totalAssets() {
+      return this.assetsForSelectedCompany.length;
+    },
   },
 
   actions: {
-    async fetchAssets(token) {
+    buildUrl(companyId = null) {
+      const companyStore = useCompanyStore();
+      const id = companyId || companyStore.selectedCompanyId;
+      return id ? `${API_URL}?companyId=${id}` : API_URL;
+    },
+
+    async fetchAssets(token, companyId = null) {
       this.loading = true;
       this.error = null;
 
       try {
-        const response = await fetch(API_URL, {
+        const response = await fetch(this.buildUrl(companyId), {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (response.ok) {
           const rawData = await response.json();
-          this.assets = rawData.map((a) => ({
-            id: a.id,
-            name: a.name,
-            type: a.type,
-            description: a.description,
-            internetExposed:
-              a.is_exposed === 1 ||
-              a.is_exposed === true ||
-              a.internetExposed === true,
-          }));
+          this.assets = rawData.map(mapAsset);
         } else {
           throw new Error("Erreur lors de la récupération des actifs");
         }
@@ -57,13 +81,11 @@ export const useAssetsStore = defineStore("assets", {
     async addAsset(assetData, token) {
       try {
         const companyStore = useCompanyStore();
+        const companyId = companyStore.selectedCompanyId;
 
-        if (!companyStore.company || !companyStore.company.id) {
-          console.error(
-            "Impossible d'ajouter un actif : aucune entreprise trouvée.",
-          );
+        if (!companyId) {
           alert(
-            "Veuillez d'abord configurer votre entreprise dans l'onglet 'Entreprise'.",
+            "Veuillez d'abord sélectionner ou créer une entreprise dans l'onglet 'Entreprise'.",
           );
           return;
         }
@@ -73,7 +95,7 @@ export const useAssetsStore = defineStore("assets", {
           type: assetData.type,
           description: assetData.description,
           is_exposed: assetData.internetExposed ? 1 : 0,
-          company_id: companyStore.company.id,
+          company_id: companyId,
         };
 
         const response = await fetch(API_URL, {
@@ -86,10 +108,10 @@ export const useAssetsStore = defineStore("assets", {
         });
 
         if (response.ok) {
-          await this.fetchAssets(token);
+          await this.fetchAssets(token, companyId);
+          await useRiskStore().calculateRisk(token, companyId);
         } else {
           const errorMsg = await response.json();
-          console.error("Détail du rejet 400 (Backend) :", errorMsg);
           alert(
             "Erreur de l'API : " + (errorMsg.message || "Requête invalide"),
           );
@@ -102,13 +124,14 @@ export const useAssetsStore = defineStore("assets", {
     async updateAsset(id, updatedData, token) {
       try {
         const companyStore = useCompanyStore();
+        const asset = this.assets.find((a) => String(a.id) === String(id));
 
         const payload = {
           name: updatedData.name,
           type: updatedData.type,
           description: updatedData.description,
           is_exposed: updatedData.internetExposed ? 1 : 0,
-          company_id: companyStore.company?.id,
+          company_id: asset?.companyId || companyStore.selectedCompanyId,
         };
 
         const response = await fetch(`${API_URL}/${id}`, {
@@ -121,7 +144,11 @@ export const useAssetsStore = defineStore("assets", {
         });
 
         if (response.ok) {
-          await this.fetchAssets(token);
+          await this.fetchAssets(token, companyStore.selectedCompanyId);
+          await useRiskStore().calculateRisk(
+            token,
+            asset?.companyId || companyStore.selectedCompanyId,
+          );
         } else {
           const errorMsg = await response.json();
           console.error(
@@ -136,14 +163,19 @@ export const useAssetsStore = defineStore("assets", {
 
     async deleteAsset(id, token) {
       try {
+        const asset = this.assets.find((a) => String(a.id) === String(id));
         const response = await fetch(`${API_URL}/${id}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (response.ok) {
-          this.assets = this.assets.filter((a) => String(a.id) !== String(id));
-          await useRiskStore().calculateRisk(token);
+          this.assets = this.assets.filter(
+            (a) => String(a.id) !== String(id),
+          );
+          if (asset?.companyId) {
+            await useRiskStore().calculateRisk(token, asset.companyId);
+          }
         } else {
           const errorMsg = await response.json().catch(() => ({}));
           alert(

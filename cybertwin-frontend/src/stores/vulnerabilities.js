@@ -1,7 +1,19 @@
 import { defineStore } from "pinia";
+import { useCompanyStore } from "./company";
 import { useRiskStore } from "./risk";
 
 const API_URL = "http://localhost:3000/api/vulnerabilities";
+
+function mapVulnerability(raw) {
+  return {
+    id: raw.id,
+    assetId: raw.asset_id,
+    companyId: raw.company_id,
+    name: raw.name,
+    description: raw.description,
+    criticality: raw.severity,
+  };
+}
 
 export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
   state: () => ({
@@ -11,39 +23,53 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
   }),
 
   getters: {
-    totalVulnerabilities: (state) => state.vulnerabilities.length,
+    vulnerabilitiesForSelectedCompany(state) {
+      const companyStore = useCompanyStore();
+      const companyId = companyStore.selectedCompanyId;
+      if (!companyId) return state.vulnerabilities;
+      return state.vulnerabilities.filter(
+        (v) => String(v.companyId) === String(companyId),
+      );
+    },
 
-    byCriticality: (state) => {
-      return state.vulnerabilities.reduce((acc, v) => {
+    totalVulnerabilities() {
+      return this.vulnerabilitiesForSelectedCompany.length;
+    },
+
+    byCriticality() {
+      return this.vulnerabilitiesForSelectedCompany.reduce((acc, v) => {
         acc[v.criticality] = (acc[v.criticality] || 0) + 1;
         return acc;
       }, {});
     },
 
-    vulnerabilitiesByAsset: (state) => (assetId) => {
-      return state.vulnerabilities.filter((v) => v.assetId === assetId);
+    vulnerabilitiesByAsset() {
+      return (assetId) =>
+        this.vulnerabilitiesForSelectedCompany.filter(
+          (v) => v.assetId === assetId,
+        );
     },
   },
 
   actions: {
-    async fetchVulnerabilities(token) {
+    buildUrl(companyId = null) {
+      const companyStore = useCompanyStore();
+      const id = companyId || companyStore.selectedCompanyId;
+      return id ? `${API_URL}?companyId=${id}` : API_URL;
+    },
+
+    async fetchVulnerabilities(token, companyId = null) {
       this.loading = true;
       this.error = null;
 
       try {
-        const response = await fetch(API_URL, {
+        const response = await fetch(this.buildUrl(companyId), {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (response.ok) {
           const rawData = await response.json();
-          this.vulnerabilities = rawData.map((v) => ({
-            id: v.id,
-            assetId: v.asset_id,
-            name: v.name,
-            description: v.description,
-            criticality: v.severity,
-          }));
+          this.vulnerabilities = rawData.map(mapVulnerability);
         }
       } catch (err) {
         console.error(err);
@@ -72,10 +98,10 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
         });
 
         if (response.ok) {
-          await this.fetchVulnerabilities(token);
+          const companyStore = useCompanyStore();
+          await this.fetchVulnerabilities(token, companyStore.selectedCompanyId);
         } else {
           const errorMsg = await response.json();
-          console.error("Détail du rejet Backend :", errorMsg);
           alert("Erreur : " + (errorMsg.message || JSON.stringify(errorMsg)));
         }
       } catch (error) {
@@ -83,17 +109,29 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
       }
     },
 
-    async runAudit(token) {
+    async runAudit(token, companyId = null) {
+      const companyStore = useCompanyStore();
+      const targetCompanyId = companyId || companyStore.selectedCompanyId;
+
+      if (!targetCompanyId) {
+        alert("Veuillez sélectionner une entreprise.");
+        return;
+      }
+
       this.loading = true;
       try {
         const response = await fetch(`${API_URL}/scan`, {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ company_id: targetCompanyId }),
         });
 
         if (response.ok) {
-          await this.fetchVulnerabilities(token);
-          await useRiskStore().calculateRisk(token);
+          await this.fetchVulnerabilities(token, targetCompanyId);
+          await useRiskStore().calculateRisk(token, targetCompanyId);
         } else {
           const error = await response.json();
           alert("Erreur lors de l'audit : " + error.message);
@@ -105,16 +143,29 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
       }
     },
 
-    async clearAllVulnerabilities(token) {
+    async clearAllVulnerabilities(token, companyId = null) {
+      const companyStore = useCompanyStore();
+      const targetCompanyId = companyId || companyStore.selectedCompanyId;
+
+      if (!targetCompanyId) {
+        alert("Veuillez sélectionner une entreprise.");
+        return;
+      }
+
       try {
-        const response = await fetch(`${API_URL}/all`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await fetch(
+          `${API_URL}/all?companyId=${targetCompanyId}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
         if (response.ok) {
-          this.vulnerabilities = [];
-          await useRiskStore().calculateRisk(token);
+          this.vulnerabilities = this.vulnerabilities.filter(
+            (v) => String(v.companyId) !== String(targetCompanyId),
+          );
+          await useRiskStore().calculateRisk(token, targetCompanyId);
         } else {
           alert("Erreur lors de la suppression totale.");
         }

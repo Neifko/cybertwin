@@ -14,25 +14,49 @@ const { getAccessTokenSilently } = useAuth0()
 
 onMounted(async () => {
   const token = await getAccessTokenSilently()
-  
+
+  await companyStore.fetchCompanies(token)
   await Promise.all([
-    companyStore.fetchCompany(token),
-    assetsStore.fetchAssets(token),
-    vulnStore.fetchVulnerabilities(token),
+    assetsStore.fetchAssets(token, companyStore.selectedCompanyId),
+    vulnStore.fetchVulnerabilities(token, companyStore.selectedCompanyId),
   ])
-  
-  await riskStore.calculateRisk(token)
+
+  await riskStore.calculateRisk(token, companyStore.selectedCompanyId)
 })
+
+async function onCompanyChange(event) {
+  const companyId = Number(event.target.value)
+  companyStore.selectCompany(companyId)
+  const token = await getAccessTokenSilently()
+
+  await Promise.all([
+    assetsStore.fetchAssets(token, companyId),
+    vulnStore.fetchVulnerabilities(token, companyId),
+  ])
+
+  await riskStore.calculateRisk(token, companyId)
+}
 
 const riskColors = {
   faible: '#10b981',
   moyen: '#f59e0b',
   élevé: '#ef4444',
 }
-const riskColor = computed(() => riskColors[riskStore.level] || '#94a3b8')
+
+const selectedReport = computed(() =>
+  riskStore.reportByCompanyId(companyStore.selectedCompanyId),
+)
+
+const riskColor = computed(
+  () => riskColors[selectedReport.value?.level] || '#94a3b8',
+)
 
 const today = computed(() =>
-  new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  new Date().toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }),
 )
 
 const recommendations = computed(() => {
@@ -40,24 +64,44 @@ const recommendations = computed(() => {
   const crit = vulnStore.byCriticality
 
   if ((crit['élevée'] || 0) > 0) {
-    recs.push("Corriger en priorité les vulnérabilités critiques identifiées, notamment les logiciels obsolètes et mots de passe faibles.")
+    recs.push(
+      'Corriger en priorité les vulnérabilités critiques identifiées, notamment les logiciels obsolètes et mots de passe faibles.',
+    )
   }
-  if (assetsStore.assets.some(a => a.internetExposed)) {
-    recs.push("Réduire la surface d'exposition Internet en limitant les services accessibles publiquement au strict nécessaire.")
+  if (assetsStore.assetsForSelectedCompany.some((a) => a.internetExposed)) {
+    recs.push(
+      "Réduire la surface d'exposition Internet en limitant les services accessibles publiquement au strict nécessaire.",
+    )
   }
-  if (vulnStore.vulnerabilities.some(v => v.name === 'Absence de sauvegarde')) {
-    recs.push("Mettre en place une politique de sauvegarde automatisée et testée régulièrement.")
+  if (
+    vulnStore.vulnerabilitiesForSelectedCompany.some(
+      (v) => v.name === 'Absence de sauvegarde',
+    )
+  ) {
+    recs.push(
+      'Mettre en place une politique de sauvegarde automatisée et testée régulièrement.',
+    )
   }
-  if (vulnStore.vulnerabilities.some(v => v.name === 'Mot de passe faible')) {
-    recs.push("Renforcer la politique de mots de passe et envisager une authentification à plusieurs facteurs.")
+  if (
+    vulnStore.vulnerabilitiesForSelectedCompany.some(
+      (v) => v.name === 'Mot de passe faible',
+    )
+  ) {
+    recs.push(
+      'Renforcer la politique de mots de passe et envisager une authentification à plusieurs facteurs.',
+    )
   }
-  recs.push("Effectuer un audit de sécurité régulier afin de suivre l'évolution du niveau de risque dans le temps.")
+  recs.push(
+    "Effectuer un audit de sécurité régulier afin de suivre l'évolution du niveau de risque dans le temps.",
+  )
 
   return recs
 })
 
 function vulnForAsset(assetId) {
-  return vulnStore.vulnerabilities.filter(v => v.assetId === assetId)
+  return vulnStore.vulnerabilitiesForSelectedCompany.filter(
+    (v) => v.assetId === assetId,
+  )
 }
 
 function printReport() {
@@ -68,23 +112,54 @@ function printReport() {
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between flex-wrap gap-4 print:hidden">
-      <h1 class="text-2xl font-display font-bold text-slate-800">
-        <i class="ti ti-file-text text-blue-600 mr-2"></i>Rapport
-      </h1>
-      <button @click="printReport" class="btn-cyber">
-        <i class="ti ti-printer mr-1"></i> Exporter / Imprimer
-      </button>
+      <div>
+        <h1 class="text-2xl font-display font-bold text-slate-800">
+          <i class="ti ti-file-text text-blue-600 mr-2"></i>Rapport
+        </h1>
+        <p v-if="companyStore.selectedCompany" class="text-sm text-slate-500 mt-1">
+          Entreprise : {{ companyStore.selectedCompany.name }}
+        </p>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <select
+          v-if="companyStore.companies.length > 0"
+          :value="companyStore.selectedCompanyId"
+          @change="onCompanyChange"
+          class="input-cyber min-w-[220px]"
+        >
+          <option
+            v-for="company in companyStore.companies"
+            :key="company.id"
+            :value="company.id"
+          >
+            {{ company.name }}
+          </option>
+        </select>
+        <button @click="printReport" class="btn-cyber" :disabled="!companyStore.selectedCompany">
+          <i class="ti ti-printer mr-1"></i> Exporter / Imprimer
+        </button>
+      </div>
     </div>
 
-    <div v-if="companyStore.loading || assetsStore.loading || vulnStore.loading || riskStore.loading" class="panel p-8 text-center text-slate-500">
+    <div
+      v-if="companyStore.loading || assetsStore.loading || vulnStore.loading || riskStore.loading"
+      class="panel p-8 text-center text-slate-500"
+    >
       Génération du rapport en cours...
     </div>
 
-    <div v-else-if="companyStore.company" class="panel p-8 space-y-8 bg-white" id="report-content">
+    <div
+      v-else-if="companyStore.selectedCompany"
+      class="panel p-8 space-y-8 bg-white"
+      id="report-content"
+    >
       <div class="text-center border-b border-slate-100 pb-6">
         <i class="ti ti-shield-lock text-4xl text-blue-600"></i>
-        <h2 class="text-2xl font-display font-bold text-slate-800 mt-2">Rapport d'analyse de risque cyber</h2>
-        <p class="text-slate-500 mt-1">Généré le {{ today }}</p>
+        <h2 class="text-2xl font-display font-bold text-slate-800 mt-2">
+          Rapport d'analyse de risque cyber
+        </h2>
+        <p class="text-slate-500 mt-1">{{ companyStore.selectedCompany.name }}</p>
+        <p class="text-slate-400 text-sm mt-1">Généré le {{ today }}</p>
       </div>
 
       <section>
@@ -94,28 +169,32 @@ function printReport() {
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100">
           <div>
             <p class="text-slate-500">Nom</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.company.name }}</p>
+            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.name }}</p>
           </div>
           <div>
             <p class="text-slate-500">Secteur</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.company.sector }}</p>
+            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.sector }}</p>
           </div>
           <div>
             <p class="text-slate-500">Employés</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.company.employeesCount }}</p>
+            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.employeesCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Serveurs</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.company.serversCount }}</p>
+            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.serversCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Postes clients</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.company.clientWorkstationsCount }}</p>
+            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.clientWorkstationsCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Services exposés</p>
             <p class="text-slate-900 font-medium">
-              {{ companyStore.company.exposedServices && companyStore.company.exposedServices.length > 0 ? companyStore.company.exposedServices.join(', ') : 'Aucun' }}
+              {{
+                companyStore.selectedCompany.exposedServices.length > 0
+                  ? companyStore.selectedCompany.exposedServices.join(', ')
+                  : 'Aucun'
+              }}
             </p>
           </div>
         </div>
@@ -135,7 +214,11 @@ function printReport() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="asset in assetsStore.assets" :key="asset.id" class="border-b border-slate-100 last:border-0">
+            <tr
+              v-for="asset in assetsStore.assetsForSelectedCompany"
+              :key="asset.id"
+              class="border-b border-slate-100 last:border-0"
+            >
               <td class="py-3 pl-3 pr-4 text-slate-900 font-medium">{{ asset.name }}</td>
               <td class="py-3 pr-4 text-slate-600">{{ asset.type }}</td>
               <td class="py-3 pr-4">
@@ -145,8 +228,10 @@ function printReport() {
               </td>
               <td class="py-3 pr-3 text-slate-600">{{ vulnForAsset(asset.id).length }}</td>
             </tr>
-            <tr v-if="assetsStore.assets.length === 0">
-              <td colspan="4" class="py-4 text-center text-slate-500 italic">Aucun actif enregistré.</td>
+            <tr v-if="assetsStore.assetsForSelectedCompany.length === 0">
+              <td colspan="4" class="py-4 text-center text-slate-500 italic">
+                Aucun actif enregistré.
+              </td>
             </tr>
           </tbody>
         </table>
@@ -168,13 +253,26 @@ function printReport() {
           </span>
         </div>
         <ul class="space-y-3 text-sm">
-          <li v-for="vuln in vulnStore.vulnerabilities" :key="vuln.id" class="flex items-start gap-2 bg-slate-50 p-3 rounded-lg border border-slate-100">
-            <i class="ti ti-alert-circle text-lg mt-0.5" :style="{ color: riskColors[vuln.criticality === 'élevée' ? 'élevé' : vuln.criticality] }"></i>
+          <li
+            v-for="vuln in vulnStore.vulnerabilitiesForSelectedCompany"
+            :key="vuln.id"
+            class="flex items-start gap-2 bg-slate-50 p-3 rounded-lg border border-slate-100"
+          >
+            <i
+              class="ti ti-alert-circle text-lg mt-0.5"
+              :style="{
+                color:
+                  riskColors[vuln.criticality === 'élevée' ? 'élevé' : vuln.criticality],
+              }"
+            ></i>
             <span class="text-slate-600 leading-relaxed">
               <strong class="text-slate-900">{{ vuln.name }}</strong> — {{ vuln.description }}
             </span>
           </li>
-          <li v-if="vulnStore.vulnerabilities.length === 0" class="text-slate-500 italic">
+          <li
+            v-if="vulnStore.vulnerabilitiesForSelectedCompany.length === 0"
+            class="text-slate-500 italic"
+          >
             Aucune vulnérabilité n'a été détectée.
           </li>
         </ul>
@@ -185,17 +283,18 @@ function printReport() {
           <i class="ti ti-alert-triangle"></i> 4. Niveau de risque global
         </h3>
         <div class="flex items-center gap-4 bg-slate-50 p-6 rounded-xl border border-slate-100">
-          <span
-            class="text-4xl font-display font-bold"
-            :style="{ color: riskColor }"
-          >
-            {{ riskStore.score }}<span class="text-xl text-slate-400">/100</span>
+          <span class="text-4xl font-display font-bold" :style="{ color: riskColor }">
+            {{ selectedReport?.score || 0 }}<span class="text-xl text-slate-400">/100</span>
           </span>
           <span
             class="px-4 py-1.5 rounded-full text-sm capitalize border font-medium"
-            :style="{ color: riskColor, borderColor: riskColor + '40', backgroundColor: riskColor + '15' }"
+            :style="{
+              color: riskColor,
+              borderColor: riskColor + '40',
+              backgroundColor: riskColor + '15',
+            }"
           >
-            Risque {{ riskStore.level }}
+            Risque {{ selectedReport?.level || 'faible' }}
           </span>
         </div>
       </section>
@@ -205,8 +304,14 @@ function printReport() {
           <i class="ti ti-bulb"></i> 5. Recommandations de sécurité
         </h3>
         <ul class="space-y-3 text-sm">
-          <li v-for="(rec, index) in recommendations" :key="index" class="flex items-start gap-2 text-slate-700 leading-relaxed">
-            <div class="mt-0.5 min-w-[20px] h-5 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+          <li
+            v-for="(rec, index) in recommendations"
+            :key="index"
+            class="flex items-start gap-2 text-slate-700 leading-relaxed"
+          >
+            <div
+              class="mt-0.5 min-w-[20px] h-5 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center"
+            >
               <i class="ti ti-check text-xs"></i>
             </div>
             {{ rec }}
@@ -219,7 +324,7 @@ function printReport() {
       <i class="ti ti-file-x text-5xl text-slate-300 mb-4"></i>
       <h2 class="text-xl font-display font-bold text-slate-700 mb-2">Rapport indisponible</h2>
       <p class="text-slate-500 max-w-md">
-        Vous devez d'abord configurer le profil de votre entreprise et évaluer ses vulnérabilités pour générer un rapport.
+        Vous devez d'abord créer une entreprise et évaluer ses vulnérabilités pour générer un rapport.
       </p>
     </div>
   </div>

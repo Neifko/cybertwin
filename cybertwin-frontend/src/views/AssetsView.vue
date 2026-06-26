@@ -39,15 +39,21 @@ const form = ref({
 
 onMounted(async () => {
   const token = await getAccessTokenSilently()
-  await Promise.all([
-    assetsStore.fetchAssets(token),
-    companyStore.fetchCompany(token) 
-  ])
+  await companyStore.fetchCompanies(token)
+  await assetsStore.fetchAssets(token, companyStore.selectedCompanyId)
 })
 
+async function onCompanyChange(event) {
+  const companyId = Number(event.target.value)
+  companyStore.selectCompany(companyId)
+  const token = await getAccessTokenSilently()
+  await assetsStore.fetchAssets(token, companyId)
+}
+
 const filteredAssets = computed(() => {
-  if (filterType.value === 'Tous') return assetsStore.assets
-  return assetsStore.assets.filter((a) => a.type === filterType.value)
+  const assets = assetsStore.assetsForSelectedCompany
+  if (filterType.value === 'Tous') return assets
+  return assets.filter((a) => a.type === filterType.value)
 })
 
 function openCreateModal() {
@@ -88,12 +94,29 @@ async function deleteAsset(id) {
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between flex-wrap gap-4">
-      <h1 class="text-2xl font-display font-bold text-slate-800">
-        <i class="ti ti-stack-2 text-blue-600 mr-2"></i>Actifs
-      </h1>
-      <button @click="openCreateModal" class="btn-cyber">
-        <i class="ti ti-plus mr-1"></i> Ajouter un actif
-      </button>
+      <div>
+        <h1 class="text-2xl font-display font-bold text-slate-800">
+          <i class="ti ti-stack-2 text-blue-600 mr-2"></i>Actifs
+        </h1>
+        <p v-if="companyStore.selectedCompany" class="text-sm text-slate-500 mt-1">
+          Entreprise : <span class="font-medium text-slate-700">{{ companyStore.selectedCompany.name }}</span>
+        </p>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <select
+          v-if="companyStore.companies.length > 0"
+          :value="companyStore.selectedCompanyId"
+          @change="onCompanyChange"
+          class="input-cyber min-w-[220px]"
+        >
+          <option v-for="company in companyStore.companies" :key="company.id" :value="company.id">
+            {{ company.name }}
+          </option>
+        </select>
+        <button @click="openCreateModal" class="btn-cyber" :disabled="!companyStore.selectedCompanyId">
+          <i class="ti ti-plus mr-1"></i> Ajouter un actif
+        </button>
+      </div>
     </div>
 
     <div class="flex flex-wrap gap-2">

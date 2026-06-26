@@ -64,7 +64,7 @@ const vClickOutside = {
             <div class="flex items-center space-x-4">
               <div class="hidden md:flex space-x-1">
                 <RouterLink to="/" class="nav-link" active-class="nav-link-active">Accueil</RouterLink>
-                <RouterLink to="/company" class="nav-link" active-class="nav-link-active">Entreprise</RouterLink>
+                <RouterLink to="/company" class="nav-link" active-class="nav-link-active">Entreprises</RouterLink>
                 <RouterLink to="/assets" class="nav-link" active-class="nav-link-active">Actifs</RouterLink>
                 <RouterLink to="/vulnerabilities" class="nav-link" active-class="nav-link-active">Vulnérabilités</RouterLink>
                 <RouterLink to="/dashboard" class="nav-link" active-class="nav-link-active">Dashboard</RouterLink>
