@@ -1,44 +1,40 @@
-import { defineStore } from 'pinia'
-import { useAssetsStore } from './assets'
-import { useVulnerabilitiesStore } from './vulnerabilities'
+import { defineStore } from "pinia";
 
-const CRITICALITY_WEIGHTS = {
-  faible: 1,
-  moyenne: 2,
-  élevée: 3,
-}
-
-export const useRiskStore = defineStore('risk', {
+export const useRiskStore = defineStore("risk", {
   state: () => ({
     score: 0,
-    level: null,
+    level: "faible",
+    metrics: null,
+    loading: false,
+    error: null,
   }),
 
   actions: {
-    calculateRisk() {
-      const assetsStore = useAssetsStore()
-      const vulnStore = useVulnerabilitiesStore()
+    async calculateRisk(token) {
+      this.loading = true;
+      this.error = null;
 
-      const assetsCount = assetsStore.totalAssets
-      const vulnCount = vulnStore.totalVulnerabilities
-      const exposedCount = assetsStore.assets.filter((a) => a.internetExposed).length
+      try {
+        const response = await fetch(
+          "http://localhost:3000/api/risk/calculate",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
-      const criticalityScore = vulnStore.vulnerabilities.reduce(
-        (sum, v) => sum + (CRITICALITY_WEIGHTS[v.criticality] || 1),
-        0
-      )
-
-      // Formule simple, à affiner avec le binôme backend
-      const rawScore =
-        vulnCount * 2 + criticalityScore * 3 + exposedCount * 4 + assetsCount * 0.5
-
-      this.score = Math.min(100, Math.round(rawScore))
-
-      if (this.score < 30) this.level = 'faible'
-      else if (this.score < 60) this.level = 'moyen'
-      else this.level = 'élevé'
-
-      return { score: this.score, level: this.level }
+        if (response.ok) {
+          const report = await response.json();
+          this.score = report.score;
+          this.level = report.level;
+          this.metrics = report.metrics;
+        }
+      } catch (err) {
+        console.error("Erreur de calcul du risque :", err);
+        this.error = err.message;
+      } finally {
+        this.loading = false;
+      }
     },
   },
-})
+});

@@ -11,7 +11,7 @@ class UserRepository extends BaseRepository {
       `SELECT * FROM ${this.tableName} WHERE auth0_id = ?`,
       [auth0Id],
     );
-    return rows[0]; // Retourne l'utilisateur ou undefined
+    return rows[0];
   }
 
   async createFromAuth0Profile(auth0Id, profile) {

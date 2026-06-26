@@ -1,4 +1,4 @@
-const db = require("../config/database"); // Ton pool de connexion mysql2/promise
+const db = require("../config/database");
 
 class BaseRepository {
   constructor(tableName) {
