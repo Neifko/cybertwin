@@ -3,7 +3,8 @@ const RiskService = require("../services/riskService");
 class RiskController {
   async calculate(req, res, next) {
     try {
-      const companyId = req.body.company_id || req.query.companyId || null;
+      const companyId =
+        (req.body && req.body.company_id) || req.query.companyId || null;
 
       if (companyId) {
         const riskReport = await RiskService.calculateRisk(

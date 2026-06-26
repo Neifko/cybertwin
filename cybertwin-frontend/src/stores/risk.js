@@ -9,7 +9,7 @@ export const useRiskStore = defineStore("risk", {
 
   getters: {
     reportByCompanyId: (state) => (companyId) =>
-      state.reports.find((r) => r.companyId === companyId),
+      state.reports.find((r) => String(r.companyId) === String(companyId)),
   },
 
   actions: {

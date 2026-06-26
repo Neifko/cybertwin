@@ -5,6 +5,7 @@ import { useAssetsStore } from '../stores/assets'
 import { useVulnerabilitiesStore } from '../stores/vulnerabilities'
 import { useRiskStore } from '../stores/risk'
 import { useAuth0 } from '@auth0/auth0-vue'
+import { getScoreRecommendation } from '../utils/riskRecommendations'
 
 const companyStore = useCompanyStore()
 const assetsStore = useAssetsStore()
@@ -12,40 +13,37 @@ const vulnStore = useVulnerabilitiesStore()
 const riskStore = useRiskStore()
 const { getAccessTokenSilently } = useAuth0()
 
+const selectedCompany = computed(() => companyStore.selectedCompany)
+const selectedReport = computed(() =>
+  riskStore.reportByCompanyId(selectedCompany.value?.id),
+)
+const scoreRecommendation = computed(() =>
+  getScoreRecommendation(selectedReport.value?.score ?? 0),
+)
+
 onMounted(async () => {
   const token = await getAccessTokenSilently()
 
   await companyStore.fetchCompanies(token)
   await Promise.all([
-    assetsStore.fetchAssets(token, companyStore.selectedCompanyId),
-    vulnStore.fetchVulnerabilities(token, companyStore.selectedCompanyId),
+    assetsStore.fetchAssets(token),
+    vulnStore.fetchVulnerabilities(token),
   ])
 
-  await riskStore.calculateRisk(token, companyStore.selectedCompanyId)
+  await riskStore.calculateAllRisks(token)
 })
 
 async function onCompanyChange(event) {
-  const companyId = Number(event.target.value)
-  companyStore.selectCompany(companyId)
-  const token = await getAccessTokenSilently()
-
-  await Promise.all([
-    assetsStore.fetchAssets(token, companyId),
-    vulnStore.fetchVulnerabilities(token, companyId),
-  ])
-
-  await riskStore.calculateRisk(token, companyId)
+  companyStore.selectCompany(Number(event.target.value))
 }
 
 const riskColors = {
-  faible: '#10b981',
-  moyen: '#f59e0b',
-  élevé: '#ef4444',
+  faible: '#059669',
+  moyenne: '#d97706',
+  moyen: '#d97706',
+  élevée: '#dc2626',
+  élevé: '#dc2626',
 }
-
-const selectedReport = computed(() =>
-  riskStore.reportByCompanyId(companyStore.selectedCompanyId),
-)
 
 const riskColor = computed(
   () => riskColors[selectedReport.value?.level] || '#94a3b8',
@@ -60,7 +58,7 @@ const today = computed(() =>
 )
 
 const recommendations = computed(() => {
-  const recs = []
+  const recs = [...(scoreRecommendation.value.recommendations || [])]
   const crit = vulnStore.byCriticality
 
   if ((crit['élevée'] || 0) > 0) {
@@ -91,11 +89,8 @@ const recommendations = computed(() => {
       'Renforcer la politique de mots de passe et envisager une authentification à plusieurs facteurs.',
     )
   }
-  recs.push(
-    "Effectuer un audit de sécurité régulier afin de suivre l'évolution du niveau de risque dans le temps.",
-  )
 
-  return recs
+  return [...new Set(recs)]
 })
 
 function vulnForAsset(assetId) {
@@ -116,8 +111,8 @@ function printReport() {
         <h1 class="text-2xl font-display font-bold text-slate-800">
           <i class="ti ti-file-text text-blue-600 mr-2"></i>Rapport
         </h1>
-        <p v-if="companyStore.selectedCompany" class="text-sm text-slate-500 mt-1">
-          Entreprise : {{ companyStore.selectedCompany.name }}
+        <p v-if="selectedCompany" class="text-sm text-slate-500 mt-1">
+          Entreprise : {{ selectedCompany.name }}
         </p>
       </div>
       <div class="flex items-center gap-3 flex-wrap">
@@ -135,7 +130,7 @@ function printReport() {
             {{ company.name }}
           </option>
         </select>
-        <button @click="printReport" class="btn-cyber" :disabled="!companyStore.selectedCompany">
+        <button @click="printReport" class="btn-cyber" :disabled="!selectedCompany">
           <i class="ti ti-printer mr-1"></i> Exporter / Imprimer
         </button>
       </div>
@@ -158,7 +153,7 @@ function printReport() {
         <h2 class="text-2xl font-display font-bold text-slate-800 mt-2">
           Rapport d'analyse de risque cyber
         </h2>
-        <p class="text-slate-500 mt-1">{{ companyStore.selectedCompany.name }}</p>
+        <p class="text-slate-500 mt-1">{{ selectedCompany.name }}</p>
         <p class="text-slate-400 text-sm mt-1">Généré le {{ today }}</p>
       </div>
 
@@ -169,30 +164,30 @@ function printReport() {
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100">
           <div>
             <p class="text-slate-500">Nom</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.name }}</p>
+            <p class="text-slate-900 font-medium">{{ selectedCompany.name }}</p>
           </div>
           <div>
             <p class="text-slate-500">Secteur</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.sector }}</p>
+            <p class="text-slate-900 font-medium">{{ selectedCompany.sector }}</p>
           </div>
           <div>
             <p class="text-slate-500">Employés</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.employeesCount }}</p>
+            <p class="text-slate-900 font-medium">{{ selectedCompany.employeesCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Serveurs</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.serversCount }}</p>
+            <p class="text-slate-900 font-medium">{{ selectedCompany.serversCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Postes clients</p>
-            <p class="text-slate-900 font-medium">{{ companyStore.selectedCompany.clientWorkstationsCount }}</p>
+            <p class="text-slate-900 font-medium">{{ selectedCompany.clientWorkstationsCount }}</p>
           </div>
           <div>
             <p class="text-slate-500">Services exposés</p>
             <p class="text-slate-900 font-medium">
               {{
-                companyStore.selectedCompany.exposedServices.length > 0
-                  ? companyStore.selectedCompany.exposedServices.join(', ')
+                selectedCompany.exposedServices.length > 0
+                  ? selectedCompany.exposedServices.join(', ')
                   : 'Aucun'
               }}
             </p>
@@ -241,6 +236,10 @@ function printReport() {
         <h3 class="text-lg font-display font-bold text-blue-600 mb-3 flex items-center gap-2">
           <i class="ti ti-bug"></i> 3. Vulnérabilités détectées ({{ vulnStore.totalVulnerabilities }})
         </h3>
+        <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+          <p class="font-semibold">{{ scoreRecommendation.title }}</p>
+          <p class="mt-1 leading-relaxed">{{ scoreRecommendation.message }}</p>
+        </div>
         <div class="flex gap-3 mb-4 text-sm font-medium">
           <span class="px-3 py-1 rounded-full bg-green-50 text-green-600 border border-green-200">
             Faible : {{ vulnStore.byCriticality.faible || 0 }}

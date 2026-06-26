@@ -45,14 +45,18 @@ export const useCompanyStore = defineStore("company", {
   getters: {
     selectedCompany(state) {
       return (
-        state.companies.find((c) => c.id === state.selectedCompanyId) ||
+        state.companies.find(
+          (c) => String(c.id) === String(state.selectedCompanyId),
+        ) ||
         state.companies[0] ||
         null
       );
     },
     company(state) {
       return (
-        state.companies.find((c) => c.id === state.selectedCompanyId) ||
+        state.companies.find(
+          (c) => String(c.id) === String(state.selectedCompanyId),
+        ) ||
         state.companies[0] ||
         null
       );
@@ -79,7 +83,9 @@ export const useCompanyStore = defineStore("company", {
 
           if (
             !this.selectedCompanyId ||
-            !this.companies.some((c) => c.id === this.selectedCompanyId)
+            !this.companies.some(
+              (c) => String(c.id) === String(this.selectedCompanyId),
+            )
           ) {
             this.selectedCompanyId = this.companies[0]?.id || null;
           }

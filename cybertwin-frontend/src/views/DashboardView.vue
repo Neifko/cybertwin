@@ -15,6 +15,7 @@ import {
   LinearScale,
   BarElement,
 } from 'chart.js'
+import { getScoreRecommendation } from '../utils/riskRecommendations'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement)
 
@@ -27,10 +28,22 @@ const { getAccessTokenSilently } = useAuth0()
 const isLoading = ref(true)
 
 const riskColors = {
-  faible: '#34d399',
-  moyen: '#fbbf24',
-  élevé: '#f87171',
+  faible: '#059669',
+  moyen: '#d97706',
+  élevé: '#dc2626',
 }
+
+const selectedCompany = computed(() => companyStore.selectedCompany)
+const selectedReport = computed(() =>
+  riskStore.reportByCompanyId(selectedCompany.value?.id),
+)
+const selectedAssets = computed(() => assetsStore.assetsForSelectedCompany)
+const selectedVulnerabilities = computed(
+  () => vulnStore.vulnerabilitiesForSelectedCompany,
+)
+const scoreRecommendation = computed(() =>
+  getScoreRecommendation(selectedReport.value?.score ?? 0),
+)
 
 onMounted(async () => {
   try {
@@ -49,24 +62,30 @@ onMounted(async () => {
   }
 })
 
+async function onCompanyChange(event) {
+  const companyId = Number(event.target.value)
+  companyStore.selectCompany(companyId)
+  isLoading.value = true
+  try {
+    const token = await getAccessTokenSilently()
+    await Promise.all([
+      assetsStore.fetchAssets(token, companyId),
+      vulnStore.fetchVulnerabilities(token, companyId),
+    ])
+    await riskStore.calculateRisk(token, companyId)
+  } catch (error) {
+    console.error('Erreur lors du changement d\'entreprise :', error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
 function riskColor(level) {
   return riskColors[level] || '#94a3b8'
 }
 
-function companyAssets(companyId) {
-  return assetsStore.assets.filter(
-    (asset) => String(asset.companyId) === String(companyId),
-  )
-}
-
-function companyVulnerabilities(companyId) {
-  return vulnStore.vulnerabilities.filter(
-    (vuln) => String(vuln.companyId) === String(companyId),
-  )
-}
-
-function assetsChartData(companyId) {
-  const data = companyAssets(companyId).reduce((acc, asset) => {
+function assetsChartData() {
+  const data = selectedAssets.value.reduce((acc, asset) => {
     acc[asset.type] = (acc[asset.type] || 0) + 1
     return acc
   }, {})
@@ -83,8 +102,8 @@ function assetsChartData(companyId) {
   }
 }
 
-function vulnChartData(companyId) {
-  const data = companyVulnerabilities(companyId).reduce((acc, vuln) => {
+function vulnChartData() {
+  const data = selectedVulnerabilities.value.reduce((acc, vuln) => {
     acc[vuln.criticality] = (acc[vuln.criticality] || 0) + 1
     return acc
   }, {})
@@ -102,23 +121,13 @@ function vulnChartData(companyId) {
   }
 }
 
-const globalSummary = computed(() => {
-  const reports = riskStore.reports
-  return {
-    companies: reports.length,
-    assets: reports.reduce((sum, r) => sum + (r.metrics?.totalAssets || 0), 0),
-    vulnerabilities: reports.reduce(
-      (sum, r) => sum + (r.metrics?.totalVulnerabilities || 0),
-      0,
-    ),
-    averageScore:
-      reports.length > 0
-        ? Math.round(
-            reports.reduce((sum, r) => sum + r.score, 0) / reports.length,
-          )
-        : 0,
-  }
-})
+const selectedSummary = computed(() => ({
+  assets: selectedAssets.value.length,
+  vulnerabilities: selectedVulnerabilities.value.length,
+  exposedAssets: selectedAssets.value.filter((asset) => asset.internetExposed).length,
+  score: selectedReport.value?.score || 0,
+  level: selectedReport.value?.level || 'faible',
+}))
 
 const chartOptions = {
   responsive: true,
@@ -144,9 +153,27 @@ const barOptions = {
 
 <template>
   <div class="space-y-6">
-    <h1 class="text-2xl font-display font-bold text-white">
-      <i class="ti ti-layout-dashboard text-cyber-cyan mr-2"></i>Tableau de bord
-    </h1>
+    <div class="flex items-center justify-between flex-wrap gap-4">
+      <div>
+        <h1 class="text-2xl font-display font-bold text-white">
+          <i class="ti ti-layout-dashboard text-cyber-cyan mr-2"></i>Tableau de bord
+        </h1>
+        <p v-if="selectedCompany" class="text-sm text-slate-500 mt-1">
+          Entreprise sélectionnée : <span class="text-slate-300 font-medium">{{ selectedCompany.name }}</span>
+        </p>
+      </div>
+
+      <select
+        v-if="companyStore.companies.length > 0"
+        :value="companyStore.selectedCompanyId"
+        @change="onCompanyChange"
+        class="input-cyber min-w-[220px]"
+      >
+        <option v-for="company in companyStore.companies" :key="company.id" :value="company.id">
+          {{ company.name }}
+        </option>
+      </select>
+    </div>
 
     <div
       v-if="isLoading || companyStore.loading || assetsStore.loading || vulnStore.loading || riskStore.loading"
@@ -165,64 +192,96 @@ const barOptions = {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div class="panel p-5">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-slate-500">Entreprises</span>
-            <i class="ti ti-building text-cyber-cyan"></i>
-          </div>
-          <p class="text-3xl font-display font-bold text-white">{{ globalSummary.companies }}</p>
-        </div>
-        <div class="panel p-5">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-slate-500">Actifs totaux</span>
+            <span class="text-sm text-slate-500">Actifs</span>
             <i class="ti ti-stack-2 text-cyber-violet"></i>
           </div>
-          <p class="text-3xl font-display font-bold text-white">{{ globalSummary.assets }}</p>
+          <p class="text-3xl font-display font-bold text-white">{{ selectedSummary.assets }}</p>
         </div>
         <div class="panel p-5">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm text-slate-500">Vulnérabilités</span>
             <i class="ti ti-bug text-cyber-pink"></i>
           </div>
-          <p class="text-3xl font-display font-bold text-white">{{ globalSummary.vulnerabilities }}</p>
+          <p class="text-3xl font-display font-bold text-white">{{ selectedSummary.vulnerabilities }}</p>
         </div>
         <div class="panel p-5">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-slate-500">Score moyen</span>
+            <span class="text-sm text-slate-500">Actifs exposés</span>
+            <i class="ti ti-world text-risk-medium"></i>
+          </div>
+          <p class="text-3xl font-display font-bold text-white">{{ selectedSummary.exposedAssets }}</p>
+        </div>
+        <div class="panel p-5">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-slate-500">Score</span>
             <i class="ti ti-alert-triangle text-risk-high"></i>
           </div>
           <p class="text-3xl font-display font-bold text-white">
-            {{ globalSummary.averageScore }}<span class="text-base text-slate-500">/100</span>
+            {{ selectedSummary.score }}<span class="text-base text-slate-500">/100</span>
           </p>
         </div>
       </div>
 
       <div
-        v-for="company in companyStore.companies"
-        :key="company.id"
-        class="panel p-6 space-y-6"
+        class="panel p-6 border border-white/10"
+        :style="{
+          backgroundColor: riskColor(selectedSummary.level) + '14',
+          borderColor: riskColor(selectedSummary.level) + '30',
+        }"
       >
         <div class="flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h2 class="text-xl font-display font-bold text-white">{{ company.name }}</h2>
-            <p class="text-sm text-slate-500">{{ company.sector }}</p>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-400 mb-2">Message de recommandation</p>
+            <h2 class="text-xl font-display font-bold text-white">{{ scoreRecommendation.title }}</h2>
+          </div>
+          <span
+            class="px-3 py-1 rounded-full text-sm capitalize border font-medium"
+            :style="{
+              color: riskColor(selectedSummary.level),
+              borderColor: riskColor(selectedSummary.level) + '40',
+              backgroundColor: riskColor(selectedSummary.level) + '15',
+            }"
+          >
+            Risque {{ selectedSummary.level }}
+          </span>
+        </div>
+        <p class="mt-3 text-slate-700 leading-relaxed">{{ scoreRecommendation.message }}</p>
+        <ul v-if="scoreRecommendation.recommendations?.length" class="mt-4 space-y-2">
+          <li
+            v-for="(rec, index) in scoreRecommendation.recommendations"
+            :key="index"
+            class="flex items-start gap-2 text-sm text-slate-700"
+          >
+            <i class="ti ti-point-filled mt-0.5" :style="{ color: riskColor(selectedSummary.level) }"></i>
+            {{ rec }}
+          </li>
+        </ul>
+      </div>
+
+      <div class="panel p-6 space-y-6">
+        <div class="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h2 class="text-xl font-display font-bold text-white">{{ selectedCompany.name }}</h2>
+            <p class="text-sm text-slate-500">{{ selectedCompany.sector }}</p>
           </div>
           <div class="flex items-center gap-3">
             <span
-              v-if="riskStore.reportByCompanyId(company.id)"
+              v-if="selectedReport"
               class="px-3 py-1 rounded-full text-sm capitalize border"
               :style="{
-                color: riskColor(riskStore.reportByCompanyId(company.id).level),
-                borderColor: riskColor(riskStore.reportByCompanyId(company.id).level) + '40',
-                backgroundColor: riskColor(riskStore.reportByCompanyId(company.id).level) + '15',
+                color: riskColor(selectedReport.level),
+                borderColor: riskColor(selectedReport.level) + '40',
+                backgroundColor: riskColor(selectedReport.level) + '15',
               }"
             >
-              {{ riskStore.reportByCompanyId(company.id).level }}
+              {{ selectedReport.level }}
             </span>
             <p
-              v-if="riskStore.reportByCompanyId(company.id)"
+              v-if="selectedReport"
               class="text-2xl font-display font-bold"
-              :style="{ color: riskColor(riskStore.reportByCompanyId(company.id).level) }"
+              :style="{ color: riskColor(selectedReport.level) }"
             >
-              {{ riskStore.reportByCompanyId(company.id).score }}<span class="text-sm text-slate-500">/100</span>
+              {{ selectedReport.score }}<span class="text-sm text-slate-500">/100</span>
             </p>
           </div>
         </div>
@@ -230,29 +289,27 @@ const barOptions = {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="rounded-xl bg-white/5 p-4">
             <p class="text-sm text-slate-500">Actifs</p>
-            <p class="text-2xl font-bold text-white">{{ companyAssets(company.id).length }}</p>
+            <p class="text-2xl font-bold text-white">{{ selectedSummary.assets }}</p>
           </div>
           <div class="rounded-xl bg-white/5 p-4">
             <p class="text-sm text-slate-500">Vulnérabilités</p>
-            <p class="text-2xl font-bold text-white">{{ companyVulnerabilities(company.id).length }}</p>
+            <p class="text-2xl font-bold text-white">{{ selectedSummary.vulnerabilities }}</p>
           </div>
           <div class="rounded-xl bg-white/5 p-4">
             <p class="text-sm text-slate-500">Actifs exposés</p>
-            <p class="text-2xl font-bold text-white">
-              {{ companyAssets(company.id).filter((a) => a.internetExposed).length }}
-            </p>
+            <p class="text-2xl font-bold text-white">{{ selectedSummary.exposedAssets }}</p>
           </div>
         </div>
 
         <div
-          v-if="riskStore.reportByCompanyId(company.id)"
+          v-if="selectedReport"
           class="w-full h-3 rounded-full bg-white/5 overflow-hidden"
         >
           <div
             class="h-full rounded-full transition-all duration-500"
             :style="{
-              width: riskStore.reportByCompanyId(company.id).score + '%',
-              backgroundColor: riskColor(riskStore.reportByCompanyId(company.id).level),
+              width: selectedReport.score + '%',
+              backgroundColor: riskColor(selectedReport.level),
             }"
           ></div>
         </div>
@@ -260,21 +317,21 @@ const barOptions = {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
             <h3 class="text-sm font-medium text-slate-400 mb-3">Répartition des actifs</h3>
-            <div class="h-56 flex justify-center items-center" v-if="companyAssets(company.id).length === 0">
+            <div class="h-56 flex justify-center items-center" v-if="selectedAssets.length === 0">
               <span class="text-slate-500 text-sm">Aucun actif</span>
             </div>
             <div class="h-56" v-else>
-              <Doughnut :data="assetsChartData(company.id)" :options="chartOptions" />
+              <Doughnut :data="assetsChartData()" :options="chartOptions" />
             </div>
           </div>
 
           <div>
             <h3 class="text-sm font-medium text-slate-400 mb-3">Vulnérabilités par criticité</h3>
-            <div class="h-56 flex justify-center items-center" v-if="companyVulnerabilities(company.id).length === 0">
+            <div class="h-56 flex justify-center items-center" v-if="selectedVulnerabilities.length === 0">
               <span class="text-slate-500 text-sm">Aucune vulnérabilité</span>
             </div>
             <div class="h-56" v-else>
-              <Bar :data="vulnChartData(company.id)" :options="barOptions" />
+              <Bar :data="vulnChartData()" :options="barOptions" />
             </div>
           </div>
         </div>

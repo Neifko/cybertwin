@@ -1,14 +1,29 @@
 <script setup>
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useVulnerabilitiesStore } from '../stores/vulnerabilities'
 import { useAssetsStore } from '../stores/assets'
 import { useCompanyStore } from '../stores/company'
+import { useRiskStore } from '../stores/risk'
 import { useAuth0 } from '@auth0/auth0-vue'
+import { getScoreRecommendation } from '../utils/riskRecommendations'
 
 const vulnStore = useVulnerabilitiesStore()
 const assetsStore = useAssetsStore()
 const companyStore = useCompanyStore()
+const riskStore = useRiskStore()
 const { getAccessTokenSilently } = useAuth0()
+
+const auditMessage = ref(null)
+
+const riskColors = {
+  faible: '#16a34a',
+  moyenne: '#d97706',
+  élevée: '#dc2626',
+}
+
+const auditReport = computed(() =>
+  riskStore.reportByCompanyId(companyStore.selectedCompanyId),
+)
 
 onMounted(async () => {
   const token = await getAccessTokenSilently()
@@ -22,6 +37,7 @@ onMounted(async () => {
 async function onCompanyChange(event) {
   const companyId = Number(event.target.value)
   companyStore.selectCompany(companyId)
+  auditMessage.value = null
   const token = await getAccessTokenSilently()
   await Promise.all([
     vulnStore.fetchVulnerabilities(token, companyId),
@@ -46,12 +62,24 @@ const criticalityStyles = {
 }
 
 async function triggerAudit() {
+  auditMessage.value = null
   const token = await getAccessTokenSilently()
   await vulnStore.runAudit(token)
+
+  if (auditReport.value) {
+    const reco = getScoreRecommendation(auditReport.value.score)
+    auditMessage.value = {
+      score: auditReport.value.score,
+      level: auditReport.value.level,
+      title: reco.title,
+      message: reco.message,
+    }
+  }
 }
 
 async function clearAudit() {
   if (confirm("Voulez-vous supprimer toutes les vulnérabilités générées ?")) {
+    auditMessage.value = null
     const token = await getAccessTokenSilently()
     await vulnStore.clearAllVulnerabilities(token)
   }
@@ -97,6 +125,39 @@ async function clearAudit() {
         >
           <i :class="vulnStore.loading ? 'ti ti-loader animate-spin' : 'ti ti-scan'"></i>
           {{ vulnStore.loading ? 'Analyse en cours...' : 'Lancer l\'audit' }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-if="auditMessage"
+      class="panel p-5 border flex items-center justify-between flex-wrap gap-4"
+      :style="{
+        backgroundColor: (riskColors[auditMessage.level] || '#64748b') + '14',
+        borderColor: (riskColors[auditMessage.level] || '#64748b') + '40',
+      }"
+    >
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">Audit terminé</p>
+        <h3 class="font-display font-bold text-slate-800">{{ auditMessage.title }}</h3>
+        <p class="text-sm text-slate-600 mt-1 leading-relaxed">{{ auditMessage.message }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span
+          class="px-3 py-1 rounded-full text-sm capitalize border font-medium"
+          :style="{
+            color: riskColors[auditMessage.level] || '#64748b',
+            borderColor: (riskColors[auditMessage.level] || '#64748b') + '40',
+            backgroundColor: (riskColors[auditMessage.level] || '#64748b') + '15',
+          }"
+        >
+          Risque {{ auditMessage.level }}
+        </span>
+        <p class="text-2xl font-display font-bold" :style="{ color: riskColors[auditMessage.level] || '#64748b' }">
+          {{ auditMessage.score }}<span class="text-sm text-slate-500">/100</span>
+        </p>
+        <button @click="auditMessage = null" class="text-slate-400 hover:text-slate-600 transition">
+          <i class="ti ti-x text-lg"></i>
         </button>
       </div>
     </div>
