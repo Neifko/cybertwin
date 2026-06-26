@@ -15,28 +15,45 @@ class RiskService {
     let totalScore = 0;
     const recommendations = [];
 
-    totalScore += assets.length * 2;
-
     vulnerabilities.forEach((vuln) => {
-      if (vuln.severity === "élevé") {
+      if (vuln.severity === "élevée" || vuln.severity === "élevé") {
         totalScore += 15;
         recommendations.push(
           `Correction critique requise sur l'actif : ${vuln.asset_name} (${vuln.name})`,
         );
-      } else if (vuln.severity === "moyen") {
+      } else if (vuln.severity === "moyenne" || vuln.severity === "moyen") {
         totalScore += 5;
       } else {
         totalScore += 2;
       }
     });
 
+    assets.forEach((asset) => {
+      if (asset.is_exposed) {
+        totalScore += 3;
+      }
+    });
+
+    let exposedServices = [];
+    if (company.exposed_services) {
+      try {
+        exposedServices = JSON.parse(company.exposed_services);
+      } catch {
+        exposedServices = [company.exposed_services];
+      }
+    }
+
     let internetExposure = false;
-    if (company.exposed_services && company.exposed_services.length > 0) {
+    if (Array.isArray(exposedServices) && exposedServices.length > 0) {
       internetExposure = true;
-      totalScore = Math.floor(totalScore * 1.5);
+      totalScore += 5;
       recommendations.push(
         "Sécuriser les services exposés sur Internet (Pare-feu, WAF).",
       );
+    }
+
+    if (internetExposure && totalScore > 0) {
+      totalScore = Math.floor(totalScore * 1.2);
     }
 
     if (assets.length === 0) {

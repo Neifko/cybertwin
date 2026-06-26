@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { useRiskStore } from "./risk";
 
 const API_URL = "http://localhost:3000/api/vulnerabilities";
 
@@ -92,6 +93,7 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
 
         if (response.ok) {
           await this.fetchVulnerabilities(token);
+          await useRiskStore().calculateRisk(token);
         } else {
           const error = await response.json();
           alert("Erreur lors de l'audit : " + error.message);
@@ -112,6 +114,7 @@ export const useVulnerabilitiesStore = defineStore("vulnerabilities", {
 
         if (response.ok) {
           this.vulnerabilities = [];
+          await useRiskStore().calculateRisk(token);
         } else {
           alert("Erreur lors de la suppression totale.");
         }

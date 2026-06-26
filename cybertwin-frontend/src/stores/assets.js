@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { useCompanyStore } from "./company";
+import { useRiskStore } from "./risk";
 
 const API_URL = "http://localhost:3000/api/assets";
 
@@ -141,10 +142,18 @@ export const useAssetsStore = defineStore("assets", {
         });
 
         if (response.ok) {
-          this.assets = this.assets.filter((a) => a.id !== id);
+          this.assets = this.assets.filter((a) => String(a.id) !== String(id));
+          await useRiskStore().calculateRisk(token);
+        } else {
+          const errorMsg = await response.json().catch(() => ({}));
+          alert(
+            "Erreur lors de la suppression : " +
+              (errorMsg.message || "Actif introuvable"),
+          );
         }
       } catch (error) {
         console.error("Erreur lors de la suppression :", error);
+        alert("Erreur réseau lors de la suppression de l'actif.");
       }
     },
   },

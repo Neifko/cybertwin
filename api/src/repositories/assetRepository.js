@@ -49,6 +49,27 @@ class AssetRepository extends BaseRepository {
     );
     return result.affectedRows > 0;
   }
+
+  async delete(id, userId) {
+    const [assets] = await db.query(
+      `SELECT a.id FROM assets a
+       JOIN companies c ON a.company_id = c.id
+       WHERE a.id = ? AND c.user_id = ?`,
+      [id, userId],
+    );
+
+    if (assets.length === 0) return false;
+
+    await db.query(`DELETE FROM vulnerabilities WHERE asset_id = ?`, [id]);
+
+    const [result] = await db.query(
+      `DELETE a FROM assets a
+       JOIN companies c ON a.company_id = c.id
+       WHERE a.id = ? AND c.user_id = ?`,
+      [id, userId],
+    );
+    return result.affectedRows > 0;
+  }
 }
 
 module.exports = new AssetRepository();
